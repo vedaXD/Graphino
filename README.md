@@ -1,84 +1,144 @@
-# Bulwark / Graphino — FalkorDB graph bootstrap
+# Bulwark — FalkorDB Graph Setup & Data Ingestion
 
-This starter initializes the first graph structure for Bulwark.
+This repository sets up Bulwark's graph database using FalkorDB. It ingests DeFi protocol, chain, stablecoin, pool, and incident data from DeFiLlama, then adds curated oracle relationships and evidence provenance.
 
-## Graphs
+## 1. Prerequisites
 
-- `defi_risk`: shared DeFi protocol, chain, asset, pool, oracle, bridge, controller, auditor, incident, and tag graph.
-- `defi_evidence`: evidence documents and findings with source provenance.
-- `mem_alice`, `mem_bob`: separate demo memory graphs. In the app, derive memory graph names from the authenticated server-side user ID; never let the LLM choose a tenant.
+- Python 3.10+
+- Docker and Docker Compose, or a running FalkorDB instance
+- Internet access for fetching DeFiLlama API data
 
-FalkorDB is schema-flexible. The labels and relationship types are documented in `src/graph_schema.py`; they become actual graph elements as nodes/edges are written. The bootstrap creates `GraphMeta` and indexes.
+## 2. Setup
 
-## Setup
+Clone the repository and navigate to its root directory (`graphino`).
 
-From the `graphino` project root:
+```bash
+git clone <repository-url>
+cd graphino
+```
+
+Create and activate a virtual environment:
 
 ```bash
 python -m venv .venv
-# Windows PowerShell:
-.venv\\Scripts\\Activate.ps1
-# macOS/Linux:
-# source .venv/bin/activate
-
-pip install -r requirements.txt
-copy .env.example .env
 ```
 
-Edit `.env` if your Docker container exposes a different host port or requires credentials.
+Windows PowerShell:
 
-If Docker maps host port `6379` to container port `6379`, use `localhost:6379`. Check with `docker ps`.
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
 
-## Initialize
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Start FalkorDB if it is not already running. If your repository includes a Docker Compose configuration, use:
+
+```bash
+docker compose up -d
+```
+
+Configure the connection using `.env.example` as a reference. Set the FalkorDB host and port as required by your environment.
+
+## 3. Run the scripts in order
+
+Run the following commands from the repository root.
+
+### Step 1: Initialize the graphs
 
 ```bash
 python -m scripts.init_graphs
-python -m scripts.inspect_graphs
 ```
 
-If Python cannot import `src`, run both commands from the `graphino` root. You can add an empty `scripts/__init__.py` if your environment expects it.
+Initializes the graph namespaces and creates their metadata.
 
-## Core risk graph model
+### Step 2: Ingest DeFiLlama data
 
-Node labels:
-`Protocol`, `Chain`, `Asset`, `Pool`, `Oracle`, `Bridge`, `Controller`, `Auditor`, `Incident`, `Tag`.
+```bash
+python -m scripts.ingest_defillama
+```
 
-Relationship types:
-- `(:Protocol)-[:DEPENDS_ON {kind, strength, source_url, confidence}]->(:Protocol|Chain|Asset|Oracle|Bridge)`
-- `(:Protocol)-[:DEPLOYED_ON]->(:Chain)`
-- `(:Protocol)-[:USES_ASSET]->(:Asset)`
-- `(:Protocol)-[:ISSUES_ASSET]->(:Asset)`
-- `(:Protocol)-[:HAS_POOL]->(:Pool)`
-- `(:Protocol)-[:USES_ORACLE]->(:Oracle)`
-- `(:Protocol)-[:ROUTES_THROUGH]->(:Bridge)`
-- `(:Protocol)-[:CONTROLLED_BY]->(:Controller)`
-- `(:Protocol)-[:AUDITED_BY]->(:Auditor)`
-- `(:Protocol)-[:AFFECTED_BY]->(:Incident)`
-- `(:Protocol)-[:HAS_TAG]->(:Tag)`
-- `(:Protocol)-[:FORKED_FROM]->(:Protocol)`
+Fetches and stores API snapshots, selects relevant protocols and chains, ingests stablecoin assets and liquidity pools, and adds available structured incident records.
 
-**Direction convention:** for `DEPENDS_ON`, `A -> B` means “A depends on B.” A shock to B can therefore be propagated to dependents by traversing incoming `DEPENDS_ON` edges. Do not create this edge from `otherProtocols` alone.
+The raw API snapshots are saved under `data/raw/`, with processed chain selections under `data/processed/`.
 
-## Evidence graph model
+### Step 3: Seed curated relationships and evidence
 
-- `(:Evidence)-[:ABOUT_PROTOCOL]->(:ProtocolRef)` is intentionally not a cross-graph edge. FalkorDB graphs are separate namespaces, so use a `protocol_id`/slug string and join in application code.
-- Within `defi_evidence`, keep evidence nodes self-contained with `protocol_id`, `incident_id`, `source_url`, and provenance fields. Use `ABOUT_PROTOCOL` / `DOCUMENTS_INCIDENT` only if you also create local reference nodes or evidence-local IDs.
+```bash
+python -m scripts.seed_curated_relationships
+```
 
-## Memory graph model
+Adds the curated oracle nodes, oracle associations, and documentation evidence used by the current implementation.
 
-Use separate graph namespaces per authenticated user. Suggested patterns:
-- `(:User)-[:HAS_PREFERENCE]->(:Preference)`
-- `(:Episode)-[:INVOLVED]->(:ProtocolRef)`
-- `(:Episode)-[:HAD_TAG]->(:Tag)`
-- `(:Mistake)-[:FROM_EPISODE]->(:Episode)`
-- `(:Mistake)-[:CAUSED_BY_TAG]->(:Tag)`
-- `(:Rule)-[:DERIVED_FROM]->(:Mistake)`
-- `(:User)-[:HAS_POSITION]->(:Position)`
-- `(:User)-[:HAS_SESSION]->(:Session)-[:HAS_TURN]->(:Turn)`
+**Note:** Oracle associations must not automatically be treated as risk dependencies. The risk engine should explicitly exclude unverified or `risk_eligible = false` relationships.
 
-## Important
+### Step 4: Verify the graph
 
-- The initialization script does not ingest live DeFiLlama data yet.
-- Use stable IDs, source URLs, retrieval timestamps, and provenance for every curated dependency edge.
-- Treat absent API fields as unknown, not as zero or false.
-- The script attempts index creation and logs errors (including duplicate-index errors) instead of failing the whole bootstrap. Verify the logs on your FalkorDB version.
+```bash
+python -m scripts.check_ingestion
+```
+
+Reports node counts by label, relationship counts by type, and sample protocols, incidents, and pools.
+
+### Step 5: Inspect FalkorDB
+
+Open FalkorDB Browser at `http://localhost:3000` if it is available in your setup. Select `defi_risk` to inspect the shared risk graph and `defi_evidence` to inspect evidence records.
+
+The per-user memory graphs are separate namespaces and are initialized independently.
+
+## 4. Graph namespaces
+
+| Graph | Purpose |
+|---|---|
+| `defi_risk` | Shared DeFi entities, relationships, and risk-propagation data |
+| `defi_evidence` | Evidence records, documentation URLs, and source provenance |
+| `mem_<user_id>` | Isolated per-user preferences, past episodes, learned rules, and other memory records |
+
+## 5. Data provenance
+
+The table below documents the current ingestion and seeding approach. DeFiLlama-derived fields are sourced from the relevant API responses; curated records are explicitly identified as seeded.
+
+| Graph | Attribute | Where it is taken from or seeded |
+|---|---|---|
+| `defi_risk` | `GraphMeta` | Seeded by `scripts/init_graphs.py` |
+| `defi_risk` | Protocol name, ID, slug, URL, description, category, TVL, chains | DeFiLlama `/protocols` API |
+| `defi_risk` | Protocol detail fields, including structured `hacks` records where available | DeFiLlama `/protocol/{slug}` API |
+| `defi_risk` | Chain name, chain ID, TVL, token symbol | DeFiLlama `/v2/chains` API |
+| `defi_risk` | Stablecoin assets and metadata | DeFiLlama `/stablecoins` API |
+| `defi_risk` | Pool project, symbol, TVL, APY, underlying tokens, and related pool metrics | DeFiLlama `/pools` API from `yields.llama.fi` |
+| `defi_risk` | `DEPLOYED_ON` | Derived from the protocol's reported chain list |
+| `defi_risk` | `HAS_POOL` | Seeded from the association between a selected protocol and its ingested pools |
+| `defi_risk` | `ON_CHAIN` | Seeded from the pool/chain association during ingestion |
+| `defi_risk` | `RELATED_TO` | Derived from DeFiLlama `otherProtocols`; not treated as a verified dependency |
+| `defi_risk` | `AFFECTED_BY` | Derived from available structured incident records during ingestion |
+| `defi_risk` | `Incident` nodes | Seeded from structured incident information returned by protocol details |
+| `defi_risk` | `Oracle` nodes | Curated and seeded by `scripts/seed_curated_relationships.py` |
+| `defi_risk` | `USES_ORACLE` | Curated and seeded by `scripts/seed_curated_relationships.py`; verification and risk eligibility are tracked separately |
+| `defi_risk` | `Controller` node and `GOVERNED_BY` | May exist from earlier seed/test scripts; verify their source and provenance before relying on them |
+| `defi_risk` | `DEPENDS_ON` | May contain test edges from `test_graph.py` and/or curated edges. Verify their provenance and eligibility before using them in risk propagation |
+| `defi_risk` | `ASSOCIATED_WITH_ASSET` | Candidate association derived or seeded from available token/stablecoin metadata; not automatically a verified dependency |
+| `defi_evidence` | `GraphMeta` | Seeded by `scripts/init_graphs.py` |
+| `defi_evidence` | `Evidence` ID, title, URL, source type | Seeded by `scripts/seed_curated_relationships.py` from the curated documentation records |
+| `mem_<user_id>` | `GraphMeta` | Seeded by `scripts/init_graphs.py` |
+| `mem_<user_id>` | Preferences, episodes, mistakes, rules, sessions, and tasks | Intended to be created by the memory subsystem as users interact with Bulwark; not populated by DeFiLlama ingestion |
+
+## 6. Important relationship semantics
+
+- `DEPENDS_ON` represents a verified dependency only when its source and scope have been validated.
+- `RELATED_TO` represents an association and must not be substituted for `DEPENDS_ON`.
+- `USES_ORACLE` records an oracle association. It does not automatically imply that the relationship is eligible for risk propagation.
+- Test-created relationships should be identified and excluded from production risk calculations until verified.
+- Evidence records live in a separate graph. Link them to risk entities through stable IDs or slugs in application code; do not assume cross-graph Cypher joins are available.
+
+## 7. Current scope and next steps
+
+The current ingestion covers a selected subset of DeFiLlama data rather than the entire DeFi ecosystem. Oracle, bridge, controller, auditor, and dependency relationships require additional curated, source-backed coverage.
+
+Next, implement and test bounded risk propagation over eligible dependency edges, using synthetic incidents before integrating risk verdicts into the application.
+
+## 8. Data attribution
+
+Protocol, chain, stablecoin, pool, and available incident information is sourced from the public DeFiLlama APIs. Curated relationships should retain their official documentation URLs, and test data should be clearly identified. This project uses the data for research and demonstration; graph associations alone do not establish that a protocol is safe or unsafe.
