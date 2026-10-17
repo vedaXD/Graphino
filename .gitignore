@@ -5,3 +5,6 @@ scripts/__init__.py
 src/__pycache__
 src/__init__.py
 data
+risk_engine/__pycache__
+risk_engine/__init__.py
+tests/__pycache__
