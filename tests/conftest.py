@@ -19,10 +19,24 @@ def _e(**kw):
     return base
 
 
+def _is_embedded(db):
+    return type(db).__module__.startswith("redislite")
+
+
 @pytest.fixture(scope="session")
 def db(tmp_path_factory):
-    from redislite.falkordb_client import FalkorDB
-    return FalkorDB(str(tmp_path_factory.mktemp("fdb") / "t.db"))
+    try:
+        from redislite.falkordb_client import FalkorDB
+        return FalkorDB(str(tmp_path_factory.mktemp("fdb") / "t.db"))
+    except (ImportError, ModuleNotFoundError):
+        from falkordb import FalkorDB
+        from risk_engine import config as C
+        return FalkorDB(
+            host=C.FALKORDB_HOST,
+            port=C.FALKORDB_PORT,
+            username=C.FALKORDB_USERNAME,
+            password=C.FALKORDB_PASSWORD,
+        )
 
 
 def _protocol(slug, **kw):
@@ -32,7 +46,13 @@ def _protocol(slug, **kw):
 
 @pytest.fixture(scope="session")
 def risk_graph(db):
-    g = db.select_graph("defi_risk")
+    graph_name = "defi_risk" if _is_embedded(db) else "defi_risk_test"
+    g = db.select_graph(graph_name)
+    try:
+        g.delete()
+    except Exception:
+        pass
+    g = db.select_graph(graph_name)
     nodes = [
         ("Protocol", _protocol("aave")), ("Protocol", _protocol("compound")),
         ("Protocol", _protocol("lend3")), ("Protocol", _protocol("lonely")),
@@ -84,23 +104,39 @@ def risk_graph(db):
     for a, t, b, props in edges:
         g.query(f"MATCH (a {{slug:$a}}), (b {{slug:$b}}) CREATE (a)-[r:{t}]->(b) SET r = $p",
                 {"a": a, "b": b, "p": props})
-    return g
+    yield g
+    if not _is_embedded(db):
+        try:
+            g.delete()
+        except Exception:
+            pass
 
 
 @pytest.fixture(scope="session")
 def evidence_graph(db):
-    g = db.select_graph("defi_evidence")
+    graph_name = "defi_evidence" if _is_embedded(db) else "defi_evidence_test"
+    g = db.select_graph(graph_name)
+    try:
+        g.delete()
+    except Exception:
+        pass
+    g = db.select_graph(graph_name)
     g.query("CREATE (:Evidence {id:'ev1', title:'Aave audit', url:'https://x/y', protocol_slug:'aave'})")
-    return g
+    yield g
+    if not _is_embedded(db):
+        try:
+            g.delete()
+        except Exception:
+            pass
 
 
 @pytest.fixture(scope="session")
 def rg(db, risk_graph):
     from risk_engine import RiskGraph
-    return RiskGraph(db)
+    return RiskGraph(db, graph_name=risk_graph.name)
 
 
 @pytest.fixture(scope="session")
 def ev(db, evidence_graph):
     from risk_engine.evidence import EvidenceIndex
-    return EvidenceIndex(db)
+    return EvidenceIndex(db, graph_name=evidence_graph.name)
