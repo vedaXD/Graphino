@@ -84,8 +84,9 @@ flowchart LR
 ### Fail-Closed Edge Eligibility
 - **Thick Edges (`==>`) carry risk:** `USES_ORACLE`, `DEPENDS_ON`, `GOVERNED_BY`.
 - **Dashed Edges (`-.->`) never carry risk:** `RELATED_TO`, `ASSOCIATED_WITH_ASSET` represent associations, excluded by policy.
-- An edge only transmits risk if:
-  $$\text{Eligible}(e) = (e.\text{risk\_eligible} = \text{true}) \land (e.\text{verified} = \text{true}) \land (e.\text{is\_test} = \text{false})$$
+- **An edge only transmits risk if:**
+  > `Eligible(e) = (e.risk_eligible == true) AND (e.verified == true) AND (e.is_test == false)`
+
   Enforced across entire paths in Cypher via:
   ```cypher
   ALL(e IN relationships(path) WHERE coalesce(e.risk_eligible, false) = true AND coalesce(e.verified, false) = true)
@@ -145,10 +146,10 @@ MERGE (r)-[:DERIVED_FROM]->(m)
 
 | Algorithm | Method | Purpose |
 | :--- | :--- | :--- |
-| **Multi-Hop Compound Strength** | $\prod_{e \in \text{path}} e.\text{strength}$ | Prunes multi-hop paths by *fewest hops first, then highest compound strength*. |
-| **Filtered PageRank** | Power-iteration ($\alpha=0.85$, $N=60$) | Measures structural centrality across verified dependency edges to rank critical infrastructure. |
-| **Reverse Contagion Cascade** | BFS on incoming edges | Simulates systemic shocks ($\text{Impact} = \text{Severity} \times \prod s_i$) and calculates exact portfolio dollar loss. |
-| **Shared Dependency Clustering** | Subgraph intersection | Detects hidden single points of failure shared across $\ge 2$ portfolio holdings to trigger concentration caps. |
+| **Multi-Hop Compound Strength** | `∏ strength(e)` along path | Prunes multi-hop paths by *fewest hops first, then highest compound strength*. |
+| **Filtered PageRank** | Power-iteration (`α=0.85`, `N=60`) | Measures structural centrality across verified dependency edges to rank critical infrastructure. |
+| **Reverse Contagion Cascade** | BFS on incoming edges | Simulates systemic shocks (`Impact = Severity × ∏ strength`) and calculates exact portfolio dollar loss. |
+| **Shared Dependency Clustering** | Subgraph intersection | Detects hidden single points of failure shared across `≥ 2` portfolio holdings to trigger concentration caps. |
 
 ---
 
@@ -289,4 +290,3 @@ Bulwark includes a production **`Dockerfile`** and **`render.yaml`** blueprint f
 - Curated dependency relationships sourced directly from official protocol documentation (Chainlink, Aave Governance, Lido, Curve, Compound).
 - Graph database engine powered by **FalkorDB**.
 
-*Disclaimer: Verdicts reflect verified data modelled in the graph. `ALLOW` means no deterministic rule fired on that data; it does not constitute financial advice. All trade executions operate in paper mode.*
