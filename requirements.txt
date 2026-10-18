@@ -3,3 +3,4 @@ python-dotenv>=1.0.0
 requests>=2.31.0
 pytest
 falkordblite; sys_platform != 'win32'  # tests only (not supported on Windows)
+mcp<2
