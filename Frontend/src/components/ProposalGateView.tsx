@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { GRAPH_NODES } from "@/lib/data/graphData";
 import { assessProposal, issueGateToken } from "@/lib/engine/riskEngine";
 import { Proposal, Verdict, GateToken, UserProfile } from "@/lib/types";
@@ -16,6 +16,9 @@ export const ProposalGateView: React.FC<ProposalGateViewProps> = ({
 }) => {
   const [protocolId, setProtocolId] = useState<string>(initialProtocolId);
   const [amountUsd, setAmountUsd] = useState<number>(100000);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [dataSource, setDataSource] = useState<"falkordb_live" | "deterministic_engine">("falkordb_live");
+  const [lastEvaluatedAt, setLastEvaluatedAt] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<Verdict | null>(() =>
     assessProposal({ protocol_id: initialProtocolId, amount_usd: 100000 }, userProfile)
   );
@@ -25,17 +28,70 @@ export const ProposalGateView: React.FC<ProposalGateViewProps> = ({
   });
   const [executionMessage, setExecutionMessage] = useState<string | null>(null);
 
+  // Sync protocol selection if initialProtocolId prop updates from parent
+  useEffect(() => {
+    if (initialProtocolId && initialProtocolId !== protocolId) {
+      setProtocolId(initialProtocolId);
+    }
+  }, [initialProtocolId]);
+
   const availableProtocols = GRAPH_NODES.filter((n) => n.label === "Protocol");
 
-  const handleRunAssessment = () => {
+  const handleRunAssessment = async () => {
+    setLoading(true);
+    setExecutionMessage(null);
+
     const proposal: Proposal = {
       protocol_id: protocolId,
       amount_usd: amountUsd,
     };
+
+    try {
+      // 1. Attempt live evaluation via FalkorDB backend API
+      const res = await fetch("/api/assess", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          protocol_id: protocolId,
+          amount_usd: amountUsd,
+          user_id: userProfile.user_id,
+          tolerance: userProfile.preferences.risk_tolerance,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.verdict) {
+          setVerdict(data.verdict);
+          if (data.gate_token && data.gate_token.issued) {
+            setGateToken({
+              token: data.gate_token.token,
+              issued_at: Date.now(),
+              expires_at: (data.gate_token.expires_at || 0) * 1000,
+              proposal_hash: `${protocolId}:${data.gate_token.approved_amount_usd}`,
+              allowed_amount_usd: data.gate_token.approved_amount_usd,
+              hmac_signature: data.gate_token.token.split(".")[1] || "hmac_verified",
+            });
+          } else {
+            setGateToken(issueGateToken(data.verdict));
+          }
+          setDataSource("falkordb_live");
+          setLastEvaluatedAt(new Date().toLocaleTimeString());
+          setLoading(false);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("Live FalkorDB assessment failed, using deterministic client fallback:", err);
+    }
+
+    // 2. Client-side deterministic fallback
     const evaluated = assessProposal(proposal, userProfile);
     setVerdict(evaluated);
     setGateToken(issueGateToken(evaluated));
-    setExecutionMessage(null);
+    setDataSource("deterministic_engine");
+    setLastEvaluatedAt(new Date().toLocaleTimeString());
+    setLoading(false);
   };
 
   const handleExecutePaperTrade = () => {
@@ -47,7 +103,7 @@ export const ProposalGateView: React.FC<ProposalGateViewProps> = ({
   };
 
   return (
-    <section id="assessment" className="space-y-6 pt-10 border-t border-[#d8d4d4] scroll-mt-20">
+    <section id="assessment" className="space-y-6 pt-4 scroll-mt-20">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-[#d8d4d4] pb-4">
         <div>
@@ -97,9 +153,19 @@ export const ProposalGateView: React.FC<ProposalGateViewProps> = ({
           <div className="sm:col-span-3">
             <button
               onClick={handleRunAssessment}
-              className="w-full pill-cta py-2 text-[14px]"
+              disabled={loading}
+              className="w-full pill-cta py-2 text-[14px] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-75 transition-all shadow-sm hover:shadow-md"
             >
-              Run Assessment
+              {loading ? (
+                <>
+                  <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  <span>Evaluating Graph...</span>
+                </>
+              ) : (
+                <>
+                  <span>⚡ Run Assessment</span>
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -111,9 +177,25 @@ export const ProposalGateView: React.FC<ProposalGateViewProps> = ({
           <div className="surface-white p-5 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#d8d4d4] pb-4">
               <div>
-                <span className="text-[10px] font-mono uppercase tracking-[0.10em] text-[#aaaaaa]">
-                  DETERMINISTIC VERDICT
-                </span>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[10px] font-mono uppercase tracking-[0.10em] text-[#aaaaaa]">
+                    DETERMINISTIC VERDICT
+                  </span>
+                  {dataSource === "falkordb_live" ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-50 text-emerald-800 border border-emerald-200">
+                      ● FALKORDB :6379 LIVE
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-50 text-amber-800 border border-amber-200">
+                      ○ DETERMINISTIC CLIENT
+                    </span>
+                  )}
+                  {lastEvaluatedAt && (
+                    <span className="text-[10px] font-mono text-[#888888]">
+                      • {lastEvaluatedAt}
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-center gap-3 mt-1">
                   <span
                     className={`px-3 py-1 rounded-[4px] text-[15px] font-mono font-bold tracking-[0.05em] uppercase border ${
@@ -147,17 +229,23 @@ export const ProposalGateView: React.FC<ProposalGateViewProps> = ({
               <div className="text-[10px] font-mono uppercase tracking-[0.10em] text-[#aaaaaa]">
                 Triggered Safety Findings ({verdict.findings.length})
               </div>
-              {verdict.findings.map((f) => (
+              {verdict.findings.map((f, idx) => (
                 <div
-                  key={f.id}
+                  key={f.id || `finding_${idx}`}
                   className="p-3.5 border border-[#d8d4d4] rounded-[4px] bg-[#f3f1ed]/40 space-y-1.5"
                 >
                   <div className="flex items-center justify-between text-[11px] font-mono">
-                    <span className="font-bold text-[#181011]">RULE {f.rule} · {f.severity.toUpperCase()}</span>
-                    <span className="tracked-badge text-[9px]">{f.action.toUpperCase()}</span>
+                    <span className="font-bold text-[#181011]">
+                      RULE {f.rule} · {f.severity.toUpperCase()}
+                    </span>
+                    <span className="tracked-badge text-[9px]">
+                      {f.action ? f.action.toUpperCase() : "EVALUATED"}
+                    </span>
                   </div>
-                  <p className="text-[13px] text-[#222222]">{f.message}</p>
-                  {f.path.length > 1 && (
+                  <p className="text-[13px] text-[#222222]">
+                    {f.message || f.summary || "No description provided."}
+                  </p>
+                  {f.path && f.path.length > 1 && (
                     <div className="text-[11px] font-mono text-[#666666]">
                       Path: {f.path.join(" ➔ ")}
                     </div>
@@ -170,19 +258,24 @@ export const ProposalGateView: React.FC<ProposalGateViewProps> = ({
             <div className="pt-3 border-t border-[#d8d4d4] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="text-[12px] font-mono text-[#181011]">
                 {gateToken ? (
-                  <span>✓ HMAC Token Sealed: <span className="font-bold">{gateToken.hmac_signature}</span></span>
+                  <span>
+                    ✓ HMAC Token Sealed:{" "}
+                    <span className="font-bold break-all">{gateToken.hmac_signature}</span>
+                  </span>
                 ) : (
                   <span className="text-[#302023] font-bold">✕ Action Gate Closed (Block Outcome)</span>
                 )}
                 {executionMessage && (
-                  <span className="block text-[#181011] mt-1">{executionMessage}</span>
+                  <span className="block text-emerald-700 font-semibold mt-1">
+                    {executionMessage}
+                  </span>
                 )}
               </div>
 
               {gateToken && (
                 <button
                   onClick={handleExecutePaperTrade}
-                  className="pill-cta text-[13px] py-1.5 px-5"
+                  className="pill-cta text-[13px] py-1.5 px-5 cursor-pointer"
                 >
                   Execute Paper Allocation
                 </button>

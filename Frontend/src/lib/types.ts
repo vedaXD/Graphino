@@ -80,12 +80,13 @@ export interface DependencyPath {
 
 export interface Finding {
   id: string;
-  rule: "R1" | "R2" | "R3" | "R4" | "R5" | "R6" | "R7" | "R8" | "R9" | "S1";
+  rule: "R1" | "R2" | "R3" | "R4" | "R5" | "R6" | "R7" | "R8" | "R9" | "S1" | string;
   severity: "high" | "medium" | "low" | "info";
-  message: string;
+  message?: string;
+  summary?: string;
   path: string[];
   subject: string;
-  action: "block" | "cap" | "warn" | "info";
+  action: "block" | "cap" | "warn" | "info" | string;
   cap_usd?: number | null;
   evidence?: {
     kind?: string;
