@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 
 export async function POST(req: NextRequest) {
@@ -11,11 +12,22 @@ export async function POST(req: NextRequest) {
     const execute = Boolean(body.execute);
 
     // Path to python executable and script
-    // Repository root is parent of Frontend directory
-    const repoRoot = path.resolve(process.cwd(), "..");
-    const pythonExe = process.platform === "win32"
-      ? path.join(repoRoot, ".venv", "Scripts", "python.exe")
-      : path.join(repoRoot, ".venv", "bin", "python");
+    // Repository root is parent of Frontend directory, or current directory if launched from root
+    let repoRoot = process.cwd();
+    if (!fs.existsSync(path.join(repoRoot, "scripts", "chat_api.py"))) {
+      repoRoot = path.resolve(process.cwd(), "..");
+    }
+
+    let pythonExe = process.env.PYTHON_BIN || process.env.PYTHON_PATH;
+    if (!pythonExe) {
+      if (process.platform === "win32") {
+        const venvWin = path.join(repoRoot, ".venv", "Scripts", "python.exe");
+        pythonExe = fs.existsSync(venvWin) ? venvWin : "python";
+      } else {
+        const venvPosix = path.join(repoRoot, ".venv", "bin", "python");
+        pythonExe = fs.existsSync(venvPosix) ? venvPosix : "python3";
+      }
+    }
 
     const scriptPath = path.join(repoRoot, "scripts", "chat_api.py");
 

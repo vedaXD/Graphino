@@ -1,0 +1,40 @@
+services:
+  # 1. FalkorDB Private Service (Option B: internal graph database)
+  - type: pserv
+    name: falkordb
+    runtime: image
+    image:
+      url: falkordb/falkordb:latest
+    disk:
+      name: falkordb-data
+      mountPath: /data
+      sizeGB: 1
+
+  # 2. Bulwark Web Application (Next.js 16 + Python Agent Orchestrator)
+  - type: web
+    name: bulwark-defi
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      # Automatically wire internal host and port from falkordb service
+      - key: FALKORDB_HOST
+        fromService:
+          type: pserv
+          name: falkordb
+          property: host
+      - key: FALKORDB_PORT
+        fromService:
+          type: pserv
+          name: falkordb
+          property: port
+      - key: FALKORDB_GRAPH_RISK
+        value: defi_risk
+      - key: FALKORDB_GRAPH_EVIDENCE
+        value: defi_evidence
+      - key: NODE_ENV
+        value: production
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      # Render will securely prompt you for this secret key in the dashboard
+      - key: GEMINI_API_KEY
+        sync: false
