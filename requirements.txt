@@ -2,6 +2,6 @@ falkordb>=1.0.0
 python-dotenv>=1.0.0
 requests>=2.31.0
 pytest
-falkordblite; sys_platform != 'win32'  # tests only (not supported on Windows)
+# falkordblite is only for offline local tests (requires Python >= 3.12)
 mcp<2
 google-genai
