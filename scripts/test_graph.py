@@ -14,15 +14,19 @@ SET b.name = 'Compound', b.category = 'Lending'
 MERGE (o:Oracle {oracle_id: 'chainlink'})
 SET o.name = 'Chainlink'
 
-MERGE (a)-[:DEPENDS_ON {
-    kind: 'oracle',
-    source_url: 'https://chain.link/'
-}]->(o)
+MERGE (a)-[r1:DEPENDS_ON]->(o)
+SET r1.kind = 'oracle',
+    r1.source_url = 'https://chain.link/',
+    r1.is_test = true,
+    r1.risk_eligible = false,
+    r1.verified = false
 
-MERGE (b)-[:DEPENDS_ON {
-    kind: 'oracle',
-    source_url: 'https://chain.link/'
-}]->(o)
+MERGE (b)-[r2:DEPENDS_ON]->(o)
+SET r2.kind = 'oracle',
+    r2.source_url = 'https://chain.link/',
+    r2.is_test = true,
+    r2.risk_eligible = false,
+    r2.verified = false
 """)
 
 res = g.query("""
