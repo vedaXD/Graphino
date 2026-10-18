@@ -1,6 +1,7 @@
 import React from "react";
 import { UserProfile } from "@/lib/types";
 import { GraphOffBenchmarkView } from "./GraphOffBenchmarkView";
+import { UserMemoryGraphVisualizer } from "./UserMemoryGraphVisualizer";
 
 interface TenantMemoryViewProps {
   currentProfile: UserProfile;
@@ -12,23 +13,14 @@ export const TenantMemoryView: React.FC<TenantMemoryViewProps> = ({
   onAuditProtocol,
 }) => {
   return (
-    <section id="memory" className="space-y-8 pt-10 border-t border-[#d8d4d4] scroll-mt-20">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-[#d8d4d4] pb-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="tracked-badge text-[10px]">EPISODIC MEMORY</span>
-            <span className="text-[#aaaaaa] text-xs font-mono">
-              mem_{currentProfile.user_id}
-            </span>
-          </div>
-          <h2 className="text-[26px] sm:text-[30px] font-normal text-[#181011] tracking-[-0.02em]">
-            Tenant Memory Rules &amp; Benchmark Analysis
-          </h2>
-        </div>
-      </div>
+    <section id="memory" className="space-y-8 pt-4 scroll-mt-20">
+      {/* Live FalkorDB Tenant Memory Graph Visualizer */}
+      <UserMemoryGraphVisualizer
+        currentProfile={currentProfile}
+        onAuditProtocol={onAuditProtocol}
+      />
 
-      {/* Grid: Left Tenant Memory / Right Benchmark Comparison */}
+      {/* Grid: Left Tenant Memory Rules & Mistakes / Right Benchmark Comparison */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Left Column: Procedural Rules & Mistakes (6 cols) */}
         <div className="lg:col-span-6 space-y-6">

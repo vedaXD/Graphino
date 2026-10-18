@@ -17,7 +17,8 @@ export type RelationshipType =
   | "HAS_POOL"
   | "AFFECTED_BY"
   | "ASSOCIATED_WITH_ASSET"
-  | "RELATED_TO";
+  | "RELATED_TO"
+  | "ON_CHAIN";
 
 export interface GraphNode {
   id: string;
@@ -201,9 +202,11 @@ export interface ShockSimulationResult {
     contagion_fraction: number;
     estimated_position_loss_usd: number;
     allocated_usd: number;
+    tvl_usd?: number;
   }[];
   total_portfolio_loss_usd: number;
   portfolio_at_risk_pct: number;
+  total_systemic_tvl_at_risk_usd?: number;
 }
 
 export interface SystemicRankItem {

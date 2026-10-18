@@ -10,10 +10,10 @@ interface AgentBlackboardViewProps {
 export const AgentBlackboardView: React.FC<AgentBlackboardViewProps> = ({
   userProfile,
 }) => {
-  const [selectedProtocol, setSelectedProtocol] = useState<string>("young-fork-protocol");
+  const [selectedProtocol, setSelectedProtocol] = useState<string>("aave-v3");
   const [amountUsd, setAmountUsd] = useState<number>(50000);
   const [pipelineResult, setPipelineResult] = useState<PipelineResult>(() =>
-    runAgentPipeline({ protocol_id: "young-fork-protocol", amount_usd: 50000 }, userProfile)
+    runAgentPipeline({ protocol_id: "aave-v3", amount_usd: 50000 }, userProfile)
   );
   const [isRunning, setIsRunning] = useState<boolean>(false);
 

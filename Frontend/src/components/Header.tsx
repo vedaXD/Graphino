@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 import { UserProfile } from "@/lib/types";
 
 interface HeaderProps {
@@ -49,10 +50,10 @@ export const Header: React.FC<HeaderProps> = ({
             </select>
           </div>
 
-          <a href="#app" className="pill-cta text-[13px] py-1.5 px-4 font-normal">
-            <span>Launch</span>
-            <span className="text-[11px] opacity-60">↓</span>
-          </a>
+          <Link href="/dashboard" className="pill-cta text-[13px] py-1.5 px-4 font-normal flex items-center gap-1.5">
+            <span>Dashboard</span>
+            <span className="text-[12px] opacity-70">→</span>
+          </Link>
         </div>
       </div>
     </header>

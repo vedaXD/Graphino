@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { TenantProvider } from "@/lib/context/TenantContext";
+import { FloatingAgentChat } from "@/components/FloatingAgentChat";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,7 +31,11 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-[#f3f1ed] text-[#181011]">
-        {children}
+        <TenantProvider>
+          {children}
+          {/* Global Floating AI Agent Chat Widget on all pages */}
+          <FloatingAgentChat />
+        </TenantProvider>
       </body>
     </html>
   );

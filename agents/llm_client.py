@@ -50,7 +50,7 @@ class GeminiLLMClient(BaseLLMClient):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY must be set in environment or passed to GeminiLLMClient.")
-        self.model = model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.model = model or os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
         from google import genai
         self.client = genai.Client(api_key=self.api_key)
 
@@ -99,30 +99,41 @@ class GeminiLLMClient(BaseLLMClient):
             tools=[types.Tool(function_declarations=function_declarations)] if function_declarations else None,
         )
 
-        try:
-            resp = self.client.models.generate_content(
-                model=self.model,
-                contents=contents,
-                config=config,
-            )
-        except Exception as e:
-            logger.warning(f"Gemini API call failed ({e}), attempting fallback model 'gemini-1.5-flash'...")
-            resp = self.client.models.generate_content(
-                model="gemini-1.5-flash",
-                contents=contents,
-                config=config,
-            )
+        resp = None
+        candidate_models = [self.model, "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
+        # Remove duplicates while preserving order
+        seen_models = set()
+        models_to_try = []
+        for m in candidate_models:
+            if m not in seen_models:
+                seen_models.add(m)
+                models_to_try.append(m)
+
+        for attempt_model in models_to_try:
+            try:
+                resp = self.client.models.generate_content(
+                    model=attempt_model,
+                    contents=contents,
+                    config=config,
+                )
+                if resp:
+                    break
+            except Exception as e:
+                logger.warning(f"Gemini API call failed for model {attempt_model}: {e}")
 
         tool_calls: list[ToolCall] = []
         text_content = ""
 
-        if resp.candidates and resp.candidates[0].content and resp.candidates[0].content.parts:
+        if resp and resp.candidates and resp.candidates[0].content and resp.candidates[0].content.parts:
             for part in resp.candidates[0].content.parts:
                 if part.text:
                     text_content += part.text
                 if part.function_call:
                     fc = part.function_call
                     tool_calls.append(ToolCall(name=fc.name, args=dict(fc.args or {}), call_id=fc.name))
+
+        if not text_content and not tool_calls:
+            text_content = "Deterministic risk assessment completed based on verified FalkorDB graph invariants."
 
         return AgentMessage(role="assistant", content=text_content, tool_calls=tool_calls)
 

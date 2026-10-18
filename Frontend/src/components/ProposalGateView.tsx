@@ -11,7 +11,7 @@ interface ProposalGateViewProps {
 
 export const ProposalGateView: React.FC<ProposalGateViewProps> = ({
   userProfile,
-  initialProtocolId = "young-fork-protocol",
+  initialProtocolId = "aave-v3",
   onTradeExecuted,
 }) => {
   const [protocolId, setProtocolId] = useState<string>(initialProtocolId);

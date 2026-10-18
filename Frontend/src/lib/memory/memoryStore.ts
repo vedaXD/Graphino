@@ -2,6 +2,52 @@ import { UserProfile, MemoryRule, MistakeRecord, UserPreferences, PortfolioPosit
 
 export const DEFAULT_PROFILES: UserProfile[] = [
   {
+    user_id: "demo_trader",
+    display_name: "Demo Active Trader (FalkorDB :6379)",
+    description: "Active multi-chain algorithmic trader connected directly to FalkorDB mem_demo_trader.",
+    capital_usd: 100000,
+    preferences: {
+      risk_tolerance: "moderate",
+      max_position_pct: 35,
+      avoid_categories: [],
+      avoid_chains: [],
+    },
+    memory_rules: [
+      {
+        id: "rule_demo_01",
+        tag: "oracle_dependence",
+        action: "cap",
+        cap_pct: 30,
+        note: "Limit portfolio exposure to any single price oracle dependency to 30% of total capital.",
+        created_at: "2024-03-12",
+      },
+    ],
+    mistakes: [],
+    positions: [
+      {
+        protocol_id: "aave-v3",
+        name: "Aave V3",
+        amount_usd: 45000,
+        entered_at: "2024-10-18",
+        gate_token: "hmac_verified_0x827a",
+      },
+      {
+        protocol_id: "lido",
+        name: "Lido Liquid Staking",
+        amount_usd: 25000,
+        entered_at: "2024-10-18",
+        gate_token: "hmac_verified_0x11ab",
+      },
+      {
+        protocol_id: "sparklend",
+        name: "SparkLend",
+        amount_usd: 15000,
+        entered_at: "2024-10-18",
+        gate_token: "hmac_verified_0x91df",
+      },
+    ],
+  },
+  {
     user_id: "institutional_guardian",
     display_name: "Apex Capital Institutional Desk",
     description: "Multi-sig risk officer operating strict capital preservation guidelines.",
@@ -59,21 +105,21 @@ export const DEFAULT_PROFILES: UserProfile[] = [
     positions: [
       {
         protocol_id: "aave-v3",
-        name: "Aave v3 Core Market",
+        name: "Aave V3 Core Market",
         amount_usd: 850000,
         entered_at: "2024-09-01",
         gate_token: "hmac_verified_0x827a",
       },
       {
-        protocol_id: "compound-v3",
-        name: "Compound v3 USDC Comet",
-        amount_usd: 650000,
+        protocol_id: "sparklend",
+        name: "SparkLend Prime Vault",
+        amount_usd: 450000,
         entered_at: "2024-09-15",
         gate_token: "hmac_verified_0x449c",
       },
       {
-        protocol_id: "makerdao",
-        name: "MakerDAO / Sky USDS Vault",
+        protocol_id: "morpho-blue",
+        name: "Morpho Blue Prime Vault",
         amount_usd: 500000,
         entered_at: "2024-10-02",
         gate_token: "hmac_verified_0x91df",
@@ -121,7 +167,7 @@ export const DEFAULT_PROFILES: UserProfile[] = [
         gate_token: "hmac_verified_0x11ab",
       },
       {
-        protocol_id: "morpho",
+        protocol_id: "morpho-blue",
         name: "Morpho Blue Prime Vault",
         amount_usd: 200000,
         entered_at: "2024-09-10",
@@ -153,7 +199,7 @@ export const DEFAULT_PROFILES: UserProfile[] = [
     positions: [
       {
         protocol_id: "aave-v3",
-        name: "Aave v3 Core Market",
+        name: "Aave V3 Core Market",
         amount_usd: 1200000,
         entered_at: "2024-07-15",
         gate_token: "hmac_verified_0x77ee",

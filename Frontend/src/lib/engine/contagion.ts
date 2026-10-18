@@ -13,7 +13,7 @@ export function simulateShock(
   const visited = new Set<string>();
 
   // Backward BFS: who depends on shockNodeId?
-  // Edge: (Protocol)-[:USES_ORACLE | :DEPENDS_ON | :GOVERNED_BY]->(Dependency)
+  // Edge: (Dependent)-[:USES_ORACLE | :DEPENDS_ON | :GOVERNED_BY | :DEPLOYED_ON | :ASSOCIATED_WITH_ASSET | :HAS_POOL]->(Dependency)
   // Incoming: e.to === shockNodeId, e.from is the dependent
   interface QueueItem {
     nodeId: string;
@@ -22,11 +22,13 @@ export function simulateShock(
     strength: number;
   }
 
+  const initialNodeName = targetNode?.name || shockNodeId;
+
   const queue: QueueItem[] = [
     {
       nodeId: shockNodeId,
       hops: 0,
-      path: [shockNodeId],
+      path: [initialNodeName],
       strength: 1.0,
     },
   ];
@@ -35,35 +37,57 @@ export function simulateShock(
     const current = queue.shift()!;
     if (current.hops >= maxHops) continue;
 
-    // Find all nodes that depend on current.nodeId
-    const incomingEdges = GRAPH_EDGES.filter(
-      (e) =>
-        e.to === current.nodeId &&
-        e.verified &&
-        e.risk_eligible &&
-        !e.is_test
-    );
+    // Find all nodes that depend on current.nodeId or current.nodeName
+    const currentNode = GRAPH_NODES.find((n) => n.id === current.nodeId);
+    const incomingEdges = GRAPH_EDGES.filter((e) => {
+      if (e.is_test) return false;
+      const matchesTo =
+        e.to === current.nodeId ||
+        (currentNode && e.to.toLowerCase() === currentNode.name.toLowerCase()) ||
+        (currentNode && e.to.toLowerCase() === currentNode.id.toLowerCase());
+
+      if (!matchesTo) return false;
+
+      // Allow all real infrastructure & structural dependency relationships
+      return (
+        e.type === "USES_ORACLE" ||
+        e.type === "DEPENDS_ON" ||
+        e.type === "GOVERNED_BY" ||
+        e.type === "DEPLOYED_ON" ||
+        e.type === "ASSOCIATED_WITH_ASSET" ||
+        e.type === "HAS_POOL" ||
+        e.verified ||
+        e.risk_eligible
+      );
+    });
 
     for (const edge of incomingEdges) {
       const dependentId = edge.from;
-      const dependentNode = GRAPH_NODES.find((n) => n.id === dependentId);
+      const dependentNode = GRAPH_NODES.find(
+        (n) => n.id === dependentId || n.name.toLowerCase() === dependentId.toLowerCase()
+      );
       if (!dependentNode) continue;
 
       const newHop = current.hops + 1;
-      const newPath = [dependentId, ...current.path];
-      const newStrength = current.strength * (edge.strength || 1.0);
+      const newPath = [dependentNode.name, ...current.path];
+      const newStrength = current.strength * (edge.strength || 0.8);
       const contagionFrac = Math.min(1.0, severity * newStrength);
 
-      const pathKey = `${dependentId}_${newHop}`;
+      const pathKey = `${dependentNode.id}_${newHop}`;
       if (!visited.has(pathKey)) {
         visited.add(pathKey);
 
-        const holding = positions.find((p) => p.protocol_id === dependentId);
+        const holding = positions.find(
+          (p) =>
+            p.protocol_id === dependentNode.id ||
+            p.protocol_id.toLowerCase() === dependentNode.id.toLowerCase() ||
+            p.name.toLowerCase() === dependentNode.name.toLowerCase()
+        );
         const allocatedUsd = holding ? holding.amount_usd : 0;
         const lossUsd = allocatedUsd * contagionFrac;
 
         impactedProtocols.push({
-          protocol_id: dependentId,
+          protocol_id: dependentNode.id,
           name: dependentNode.name,
           hops: newHop,
           path: newPath,
@@ -71,10 +95,11 @@ export function simulateShock(
           contagion_fraction: Number(contagionFrac.toFixed(3)),
           estimated_position_loss_usd: Number(lossUsd.toFixed(2)),
           allocated_usd: allocatedUsd,
+          tvl_usd: dependentNode.tvl_usd,
         });
 
         queue.push({
-          nodeId: dependentId,
+          nodeId: dependentNode.id,
           hops: newHop,
           path: newPath,
           strength: newStrength,
@@ -83,12 +108,20 @@ export function simulateShock(
     }
   }
 
-  // Sort by highest contagion fraction
-  impactedProtocols.sort((a, b) => b.contagion_fraction - a.contagion_fraction);
+  // Sort by highest portfolio loss, then highest contagion fraction
+  impactedProtocols.sort(
+    (a, b) =>
+      b.estimated_position_loss_usd - a.estimated_position_loss_usd ||
+      b.contagion_fraction - a.contagion_fraction
+  );
 
   const totalPortfolioCapital = positions.reduce((sum, p) => sum + p.amount_usd, 0);
   const totalLossUsd = impactedProtocols.reduce(
     (sum, p) => sum + p.estimated_position_loss_usd,
+    0
+  );
+  const totalTvlAtRisk = impactedProtocols.reduce(
+    (sum, p) => sum + (p.tvl_usd || 0),
     0
   );
   const lossPct =
@@ -101,24 +134,40 @@ export function simulateShock(
     impacted_protocols: impactedProtocols,
     total_portfolio_loss_usd: Number(totalLossUsd.toFixed(2)),
     portfolio_at_risk_pct: Number(lossPct.toFixed(1)),
+    total_systemic_tvl_at_risk_usd: totalTvlAtRisk,
   };
 }
 
 // Compute Systemic Importance Leaderboard (PageRank & Transitive Dependents)
 export function computeSystemicImportance(): SystemicRankItem[] {
   const eligibleEdges = GRAPH_EDGES.filter(
-    (e) => e.verified && e.risk_eligible && !e.is_test
+    (e) =>
+      !e.is_test &&
+      (e.type === "USES_ORACLE" ||
+        e.type === "DEPENDS_ON" ||
+        e.type === "GOVERNED_BY" ||
+        e.type === "DEPLOYED_ON" ||
+        e.type === "ASSOCIATED_WITH_ASSET" ||
+        e.type === "HAS_POOL" ||
+        e.verified ||
+        e.risk_eligible)
   );
 
   const items: SystemicRankItem[] = [];
 
   for (const node of GRAPH_NODES) {
-    // 1. Direct dependents: protocols with direct outgoing edge to this node
+    // Direct dependents: protocols/nodes with direct outgoing edge to this node
     const directDependents = eligibleEdges
-      .filter((e) => e.to === node.id)
+      .filter(
+        (e) =>
+          e.to === node.id || e.to.toLowerCase() === node.name.toLowerCase()
+      )
       .map((e) => e.from);
 
-    // 2. Transitive dependents (walk backwards up to 3 hops)
+    // Filter out leaf protocols from leaderboard so it focuses on critical infrastructure
+    if (directDependents.length === 0 && node.label === "Protocol") continue;
+
+    // Transitive dependents (walk backwards up to 3 hops)
     const transitiveSet = new Set<string>();
     const queue = [...directDependents];
     queue.forEach((d) => transitiveSet.add(d));
@@ -138,11 +187,15 @@ export function computeSystemicImportance(): SystemicRankItem[] {
       }
     }
 
-    // 3. Approximate PageRank Score based on inbound edge weight and centralities
+    // PageRank score based on inbound edge weight and dependent TVLs
     let pageRank = 0.05;
-    for (const edge of eligibleEdges.filter((e) => e.to === node.id)) {
+    for (const edge of eligibleEdges.filter(
+      (e) => e.to === node.id || e.to.toLowerCase() === node.name.toLowerCase()
+    )) {
       const sourceNode = GRAPH_NODES.find((n) => n.id === edge.from);
-      const tvlWeight = sourceNode?.tvl_usd ? Math.log10(sourceNode.tvl_usd) / 10 : 0.5;
+      const tvlWeight = sourceNode?.tvl_usd
+        ? Math.log10(sourceNode.tvl_usd) / 10
+        : 0.5;
       pageRank += (edge.strength || 0.8) * tvlWeight * 0.15;
     }
 
