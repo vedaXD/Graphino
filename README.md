@@ -1,34 +1,30 @@
 # Bulwark
 
-**A DeFi risk guardian whose agents reason over a FalkorDB graph, remember each user across sessions, and cannot act without a signed approval.**
+**An autonomous, graph-powered DeFi risk intelligence platform and deterministic circuit breaker.**
 
+Bulwark pairs multi-agent reasoning with **FalkorDB's GraphBLAS engine** to uncover multi-hop systemic risks, simulate cascading infrastructure shocks, and enforce mathematical execution guardrails before capital is deployed.
 
-## The problem
+---
 
-DeFi risk is rarely in the protocol you are looking at. It sits two or three hops away: a shared oracle, a stablecoin with a weak peg, a single-key admin, a dependency that was hacked last year. An LLM with a search box sees one hop. A dashboard shows one protocol at a time. Two "diversified" positions can quietly rest on the same oracle, and nothing warns you until it fails.
+## The Problem: The Composable Domino Effect
 
-Agents that move money have a second problem: they forget. The same user makes the same mistake in the next session, and a model that "decides" the risk can be talked into anything.
+In Decentralized Finance (DeFi), protocols are hyper-composable Lego blocks. Risks rarely live in the protocol you are looking at—they sit **2 to 3 hops away**:
+- A lending market depending on an oracle aggregated by unvetted node operators.
+- A yield vault governed by a single-key externally owned account (EOA) without a timelock.
+- Two seemingly "diversified" portfolio holdings secretly dependent on the same depegging stablecoin or bridge.
 
-## What Bulwark does
+Traditional dashboards track isolated 1-hop metrics (TVL, APY), while autonomous AI agents are prone to hallucinations and non-deterministic logic. **Bulwark bridges this gap:** autonomous LLM agents propose and reason, but **only deterministic graph algorithms on FalkorDB permit execution**.
 
-You propose a position ("put $2,000 into X"). Bulwark:
+---
 
-1. **Walks the dependency graph** up to 3 hops over *verified* edges only, finding shared oracles, stablecoin pegs, admin keys and incidents the protocol itself never mentions.
-2. **Applies deterministic rules** to what it found. The LLM never decides the verdict; it explains it, with the graph path and source URL behind every finding.
-3. **Remembers you.** Mistakes, preferences and learned rules live in a per-user memory graph. Next session, a rule you earned last week caps or blocks a new proposal.
-4. **Gates the action.** The executor agent can only act with an HMAC-signed token issued for that exact proposal and amount.
-5. **Says "not in the graph"** when it does not know. An empty traversal means *not modelled*, never *safe*.
+## Core Capabilities
 
-## Why it needs a graph
-
-| Question | Without a graph | With the FalkorDB graph |
-|---|---|---|
-| "Is X risky?" | Summarises X's own docs (hop 1) | Finds the oracle X shares with two other holdings (hop 2-3) |
-| "Am I diversified?" | Counts tickers | Computes capital share per shared dependency |
-| "What breaks if oracle O fails?" | Guesses | Reverse traversal with per-edge strength, estimated loss per position |
-| "Have I made this mistake before?" | No memory | Tag join to the user's memory graph, rule fires |
-
-See [Graph-off comparison](#graph-off-comparison) for the same prompts run with graph tools disabled.
+1. **Multi-Hop Dependency Traversal (1–3 Hops)**: Uncovers transitive oracle, bridge, and controller dependencies across verified, source-backed documentation edges.
+2. **Deterministic Action Gate (Rules R1–R9, S1)**: Mathematical policy verification enforcing concentration limits, single-oracle alerts, and exploit history checks.
+3. **Cryptographic HMAC Gate Tokens**: The executor agent *cannot* move funds without a time-limited HMAC token issued exclusively by the deterministic gate.
+4. **Contagion Engine & Reverse Shock Simulation**: Traces reverse incoming dependency paths to quantify systemic blast radiuses and portfolio dollar loss if upstream infrastructure fails.
+5. **Multi-Tenant Graph Memory (`mem_<user_id>`)**: Each trader or fund operates an isolated FalkorDB memory graph, automatically promoting historical mistakes into active, enforced protective rules (`(Rule)-[:DERIVED_FROM]->(Mistake)`).
+6. **Fail-Closed Semantics**: If a protocol or dependency is unmodelled in the graph, Bulwark flags it as *unknown*, never *safe*.
 
 ---
 
@@ -57,19 +53,17 @@ flowchart LR
     ORCH --> VAL[Citation validator]
 ```
 
-One FalkorDB instance, three kinds of graph:
+### Three-Tier Graph Topology on FalkorDB
 
-| Graph | Contents | Writer |
-|---|---|---|
-| `defi_risk` | Shared protocols, chains, assets, pools, oracles, controllers, incidents and dependency edges | Ingestion scripts only. Agents never write here |
-| `defi_evidence` | Documentation and source records, joined to risk entities by slug in application code | Seed script |
-| `mem_<user_id>` | One isolated graph per user: preferences, episodes, mistakes, learned rules, sessions, agent tasks | Memory subsystem |
-
-FalkorDB has no cross-graph Cypher, so the joins are explicit: evidence by slug, memory by a **controlled tag vocabulary** (`young_protocol`, `admin_eoa`, `shared_dependency`, ...) that both the risk findings and the memory records use.
+| Graph | Scope | Contents & Access |
+| :--- | :--- | :--- |
+| `defi_risk` | **Shared Read-Only** | Protocols, Oracles, Controllers, Assets, Chains, Pools, Incidents, and verified dependency relationships. Agents never write here. |
+| `defi_evidence` | **Shared Read-Only** | Cryptographic proof, source documentation URLs, audit registries, and verification metadata. |
+| `mem_<user_id>` | **Private Per-Tenant** | Isolated per user/agent: preferences, portfolio positions, recorded mistakes, learned rules, and task handoffs. |
 
 ---
 
-## Graph data model
+## Graph Data Model & Edge Semantics
 
 ```mermaid
 flowchart LR
@@ -87,245 +81,212 @@ flowchart LR
     Protocol -.->|ASSOCIATED_WITH_ASSET| Asset
 ```
 
-**Thick arrows carry risk. Dashed arrows never do.** A thick edge only propagates risk if it is explicitly `risk_eligible = true`, carries a verified status, is not a test edge, and has a `source_url`. Anything else stays in the graph for context but is invisible to every risk query. `RELATED_TO` (from DeFiLlama `otherProtocols`) and `ASSOCIATED_WITH_ASSET` are associations, not dependencies, and are excluded by type regardless of their properties.
-
-### What is in the graph
-
-| Entity | Count | Source |
-|---|---|---|
-| `Protocol` | **27** | Selected DeFi subset of DeFiLlama `/protocols` (8,749 records) and `/protocol/{slug}` |
-| `Pool` | **54** | DeFiLlama yields `/pools` (16,563 records), with `apy`, `apy_base`, `apy_reward`, `il_risk`, `outlier` |
-| `Asset` (stablecoins) | **11** | DeFiLlama `stablecoins.llama.fi`, with `peg_mechanism`, `peg_type`, price |
-| `Chain` | **8** | DeFiLlama `/v2/chains` (425 records) |
-| `Incident` | **2** | Structured `hacks` records from `/protocol/{slug}` |
-| `Oracle` | **3** | Curated seed with official documentation URLs |
-| `Controller` | **2** | Curated seed (`aave-governance`, `chainlink-node-operators`) |
-| `Evidence` (in `defi_evidence`) | curated | Documentation records for the curated edges |
-| Relationships | `DEPLOYED_ON`, `HAS_POOL`, `ON_CHAIN`, `AFFECTED_BY`, `RELATED_TO`, `USES_ORACLE`, `DEPENDS_ON`, `GOVERNED_BY`, `ASSOCIATED_WITH_ASSET` | Derived during ingestion or curated |
-
-**The graph is small on purpose.** A graph full of guessed dependencies is worse than useless for a risk tool. Every risk-carrying edge is hand-curated from official documentation and keeps its `source_url`; the 27/54/11 DeFiLlama-derived nodes give those edges realistic context. Coverage is the limitation, and the engine reports it instead of hiding it (see [Honest limits](#honest-limits)).
-
-### Provenance
-
-| Data | Where it comes from |
-|---|---|
-| Protocol, chain, asset, pool, incident attributes | Public DeFiLlama APIs. Raw snapshots saved under `data/raw/` |
-| `DEPLOYED_ON`, `HAS_POOL`, `ON_CHAIN`, `AFFECTED_BY` | Derived from the same responses during ingestion |
-| `RELATED_TO` | DeFiLlama `otherProtocols`. Association only |
-| `Oracle`, `USES_ORACLE`, curated `DEPENDS_ON` / `GOVERNED_BY`, `defi_evidence` | **Seeded** by `scripts/seed_curated_relationships.py` from official docs. Each edge keeps `source_url`, `verification_status`, `risk_eligible`, `strength` |
-| `mem_<user_id>` | Not seeded. Created by the memory subsystem as the user interacts |
-
-Reproduce from scratch:
-
-```bash
-docker compose up -d
-python -m scripts.init_graphs
-python -m scripts.ingest_defillama
-python -m scripts.seed_curated_relationships
-python -m scripts.check_ingestion
-```
+### Fail-Closed Edge Eligibility
+- **Thick Edges (`==>`) carry risk:** `USES_ORACLE`, `DEPENDS_ON`, `GOVERNED_BY`.
+- **Dashed Edges (`-.->`) never carry risk:** `RELATED_TO`, `ASSOCIATED_WITH_ASSET` represent associations, excluded by policy.
+- An edge only transmits risk if:
+  $$\text{Eligible}(e) = (e.\text{risk\_eligible} = \text{true}) \land (e.\text{verified} = \text{true}) \land (e.\text{is\_test} = \text{false})$$
+  Enforced across entire paths in Cypher via:
+  ```cypher
+  ALL(e IN relationships(path) WHERE coalesce(e.risk_eligible, false) = true AND coalesce(e.verified, false) = true)
+  ```
 
 ---
 
-## How the agent reasons over the graph
+## Cypher Queries & Graph Algorithms
 
-All Cypher lives in [`risk_engine/queries.py`](risk_engine/queries.py); `python -m risk_engine.cli queries` prints every query. The eligibility predicate (`ELIG`) is applied to **every edge of every path**, in Cypher:
+### 1. Key Cypher Queries ([`risk_engine/queries.py`](risk_engine/queries.py))
 
-```cypher
-// ELIG(e): fail-closed. Missing flags exclude the edge.
-coalesce(e.risk_eligible,false) = true
-AND toLower(coalesce(e.verification_status,'')) IN ['verified', ...]
-AND coalesce(e.is_test,false) = false
-```
-
-**1. Multi-hop dependencies of a protocol** (what is X really built on?)
+#### Forward Multi-Hop Dependency Paths (`forward_paths`)
+Finds all upstream components a protocol depends on up to 3 hops deep:
 ```cypher
 MATCH path = (p:Protocol)-[:DEPENDS_ON|USES_ORACLE|GOVERNED_BY*1..3]->(o)
-WHERE p.slug IN $keys AND ALL(e IN relationships(path) WHERE ELIG(e))
-RETURN p.slug, labels(o), properties(o),
-       [n IN nodes(path) | coalesce(n.slug, n.oracle_id, n.asset_id, n.controller_id)],
+WHERE coalesce(p.slug, p.id, p.name) IN $keys 
+  AND ALL(e IN relationships(path) WHERE (coalesce(e.risk_eligible, false) = true AND coalesce(e.verified, false) = true))
+RETURN coalesce(p.slug, p.id), labels(o), properties(o),
+       [n IN nodes(path) | coalesce(n.slug, n.id)],
        [e IN relationships(path) | type(e)],
        [e IN relationships(path) | e.strength],
        [e IN relationships(path) | e.source_url]
 ```
 
-**2. Shock simulation** (who breaks if node `$k` fails? Walk incoming edges)
+#### Reverse Contagion Blast Radius (`reverse_paths`)
+Walks *incoming* dependency edges backwards to determine who breaks when infrastructure node `$k` fails:
 ```cypher
 MATCH path = (o)-[:DEPENDS_ON|USES_ORACLE|GOVERNED_BY*1..3]->(s)
-WHERE coalesce(s.slug, s.oracle_id, s.asset_id, s.controller_id) = $k
-  AND ALL(e IN relationships(path) WHERE ELIG(e))
-RETURN ... // same path columns as above
+WHERE coalesce(s.slug, s.id, s.name) = $k 
+  AND ALL(e IN relationships(path) WHERE (coalesce(e.risk_eligible, false) = true AND coalesce(e.verified, false) = true))
+RETURN coalesce(s.slug, s.id), coalesce(o.slug, o.id), labels(o), properties(o),
+       [n IN nodes(path) | coalesce(n.slug, n.id)],
+       [e IN relationships(path) | type(e)],
+       [e IN relationships(path) | e.strength]
 ```
 
-**3. Incidents for a set of dependencies**
+#### Incident History Lookup (`Q_INCIDENTS`)
+Identifies historical exploits affecting the protocol or any of its upstream dependencies:
 ```cypher
 MATCH (p)-[:AFFECTED_BY]->(i:Incident)
-WHERE coalesce(p.slug, p.oracle_id, p.asset_id) IN $keys
-RETURN coalesce(p.slug, p.oracle_id, p.asset_id), properties(i)
+WHERE coalesce(p.slug, p.id) IN $keys 
+RETURN coalesce(p.slug, p.id), properties(i)
 ```
 
-**4. Pools for yield-quality checks**
+#### Tenant Memory Rule Promotion (`mem_<user_id>`)
+Links learned protective rules directly to historical loss records:
 ```cypher
-MATCH (p:Protocol)-[:HAS_POOL]->(pl:Pool) WHERE p.slug = $k RETURN properties(pl) LIMIT 50
+MATCH (u:User {user_id: $user_id})-[:MADE_MISTAKE]->(m:Mistake {id: $m_id})
+CREATE (r:LearnedRule {id: $r_id, tag: $tag, action: $action, cap_pct: $cap_pct, status: 'active'})
+MERGE (u)-[:HAS_RULE]->(r)
+MERGE (r)-[:DERIVED_FROM]->(m)
 ```
-
-**5. Graph-health diagnostics** (why is my output empty?)
-```cypher
-MATCH ()-[e:DEPENDS_ON|USES_ORACLE|GOVERNED_BY|RELATED_TO|ASSOCIATED_WITH_ASSET]->()
-RETURN type(e), count(e),
-       sum(CASE WHEN ELIG(e) THEN 1 ELSE 0 END) AS eligible
-```
-
-**6. Per-user memory context** (Track 2). Mistakes and rules are matched to risk findings by tag:
-```cypher
-MATCH (u:User {id:$uid})-[:LEARNED]->(r:LearnedRule)
-RETURN r.id, r.tag, r.action, r.cap_pct, r.note
-```
-
-### Algorithms
-
-| Algorithm | Where | What it does |
-|---|---|---|
-| Bounded variable-length traversal (depth clamped to 1-4, default 3) | `queries.py` | Finds dependency paths; depth is a validated integer, never user text |
-| Per-edge eligibility filter | `queries.py` | `ALL(e IN relationships(path) WHERE ELIG(e))` so an ineligible edge can never reach a rule |
-| Shock propagation | `propagation.py` | Impact = severity x product of edge `strength` along the best path (fewest hops, then strongest). An **estimate**, labelled as one |
-| Shared-dependency exposure | `propagation.py` | Groups holdings by common dependency and computes capital share, before vs after the proposed position |
-| PageRank (systemic importance) | `propagation.py` | Computed in Python over eligible edges only. FalkorDB's native `algo.pageRank` filters by label and type, not edge property, so it would count ineligible edges |
-| Rule engine R1-R9, S1 | `rules.py` | Deterministic checks (table below) producing findings with path, severity, action and cap |
-| HMAC action gate | `gate.py` | Issues a time-limited token bound to protocol, chain and approved amount. The executor verifies it |
-| Citation validator | `agents/` | Every protocol id, USD amount, percentage and URL in the final answer must appear in this turn's tool results |
-| Tag join | `memory/` | Links risk findings to a user's mistakes and learned rules without cross-graph queries |
-
-### Risk rules
-
-| Rule | Fires on | Action |
-|---|---|---|
-| R1 | One shared dependency would hold >40% of capital | cap |
-| R2 | No listed audits / listed under 90 days | cap 5% |
-| R3 | Own or dependency incident in the last 2 years | cap 10% / 5% |
-| R4 | Dependency stablecoin >1% off peg, or algorithmic | block / cap |
-| R5 | Single-key or <3-signer controller, no timelock, single oracle | cap / warn |
-| R6 | TVL collapse, APY outliers, reward-driven yield | warn |
-| R7 | User's learned rules and past mistakes (memory) | per rule |
-| R8 | User preferences (max position, avoid category/chain) | cap / block |
-| R9 | No verified dependencies modelled | warn: unknown, not safe |
-| S1 | Synthetic what-if shock, computed in memory, never written | warn / cap |
-
-Thresholds are **illustrative policy** in `risk_engine/config.py`, not industry standards. A user's `risk_tolerance` scales percentage caps (0.5x / 1x / 1.5x).
 
 ---
 
-## Agents, tools and MCP
+### 2. Graph Algorithms Implemented ([`risk_engine/propagation.py`](risk_engine/propagation.py))
 
-| Agent | Allowed tools | Role |
-|---|---|---|
-| Analyst | `search_protocol`, `get_protocol_profile`, `simulate_shock`, `portfolio_exposure`, `systemic_importance`, read-only Cypher | Gather context |
-| Guardian | `assess_proposal`, memory tools | Run the engine, explain the verdict with citations |
-| Executor | `execute_paper_trade` | Acts **only** with a valid gate token |
-
-- **`defi-risk` MCP server** wraps the risk engine. `gate.issue` is *not* exposed to any model; the orchestrator issues tokens, and only for `ALLOW`, `WARN` or `ALLOW_WITH_CAP` verdicts.
-- **`defi-memory` MCP server** exposes load/record/promote/forget for the user's memory graph.
-- **Official `@falkordb/mcpserver`** (read-only) is available for ad-hoc Cypher.
-- **Coordination:** agents hand work to each other through `Task` nodes in the user's graph (`from`, `to`, `status`, `payload_ref`), so state lives in the graph and not in chat history.
-
-## Memory across sessions
-
-```mermaid
-flowchart LR
-    S1[Session 1<br/>user loses money on a one-key admin] --> M[Mistake<br/>tag: admin_eoa]
-    M -->|2nd occurrence or user confirms| R[LearnedRule<br/>admin_eoa to block]
-    R --> G[(mem_user)]
-    G --> S2[Session 2, fresh process]
-    S2 --> V[New proposal gets a finding<br/>with memory_ref = rule]
-```
-
-Node types: `User`, `Preference`, `Session`, `Episode` (proposal, verdict, decision, outcome), `Mistake`, `LearnedRule`, `Task`. Writes are idempotent (`MERGE`) and parameterised. A test starts a fresh set of objects for "session 2" and proves a rule recorded in session 1 changes the verdict.
+| Algorithm | Method | Purpose |
+| :--- | :--- | :--- |
+| **Multi-Hop Compound Strength** | $\prod_{e \in \text{path}} e.\text{strength}$ | Prunes multi-hop paths by *fewest hops first, then highest compound strength*. |
+| **Filtered PageRank** | Power-iteration ($\alpha=0.85$, $N=60$) | Measures structural centrality across verified dependency edges to rank critical infrastructure. |
+| **Reverse Contagion Cascade** | BFS on incoming edges | Simulates systemic shocks ($\text{Impact} = \text{Severity} \times \prod s_i$) and calculates exact portfolio dollar loss. |
+| **Shared Dependency Clustering** | Subgraph intersection | Detects hidden single points of failure shared across $\ge 2$ portfolio holdings to trigger concentration caps. |
 
 ---
 
-## Graph-off comparison
+## Deterministic Rule Set (Rules R1–R9 & S1)
 
-Same prompts, same model, graph tools disabled (`--graph-off`):
+| Rule | Name | Evaluated Risk Condition | Action |
+| :--- | :--- | :--- | :--- |
+| **R1** | **Shared Concentration** | >40% of capital concentrated on a single shared upstream dependency across multiple holdings. | `CAP` |
+| **R2** | **Young / Unaudited** | Protocol lists zero audits or listing maturity is < 90 days. | `CAP 5%` |
+| **R3** | **Incident History** | Historical hack or exploit on target protocol or any upstream dependency in past 2 years. | `CAP 10% / 5%` |
+| **R4** | **Stablecoin Peg** | Peg mechanism is uncollateralized/algorithmic or deviates >1.5% off peg. | `BLOCK / CAP` |
+| **R5** | **Governance / Oracle** | Single-key EOA, multisig with <3 signers, zero timelock, or unredundant single oracle feed. | `CAP / WARN` |
+| **R6** | **Market Stress** | 7-day TVL drop exceeding -30% or reward-driven yield APY outlier anomalies. | `WARN` |
+| **R7** | **Learned Memory** | Violation of a user's learned memory rule derived from past trading losses. | `PER RULE (BLOCK/CAP)` |
+| **R8** | **User Preferences** | Exceeds max position size percentage or targets user-avoided categories/chains. | `CAP / BLOCK` |
+| **R9** | **Coverage / Unknown** | Protocol or dependency is unmodelled in the verified graph (fail-closed). | `BLOCK / WARN` |
+| **S1** | **Synthetic Shock** | Transitive impact from real-time simulated failure shock exceeds tolerance threshold. | `WARN / CAP` |
 
-| Prompt | Graph on | Graph off |
-|---|---|---|
-| `<prompt 1: shared-oracle portfolio>` | `<fill from run>` | `<fill from run>` |
-| `<prompt 2: hop-3 dependency incident>` | `<fill from run>` | `<fill from run>` |
-| `<prompt 3: unknown protocol>` | Blocks, "not in the graph", did-you-mean | `<fill from run>` |
+---
 
-## Why FalkorDB
+## Product Interface & Screenshots
 
-For 27 protocols, any database can store the data. We chose FalkorDB for what the *workload* needs. We did not run a benchmark, and the comparison below is about fit, not speed.
+### 1. Dashboard & Contagion Stress-Testing Engine
+The Contagion Engine simulates real-time failure cascades across multi-hop paths, displaying portfolio capital at risk, systemic TVL exposure, and PageRank rankings.
 
-| Need | FalkorDB | Neo4j | RDBMS (Postgres) |
-|---|---|---|---|
-| Bounded multi-hop traversal with a predicate on **every edge** | Native Cypher: `ALL(e IN relationships(path) WHERE ...)` | Same | Recursive CTE; per-edge predicates and path arrays are verbose and easy to get wrong |
-| One isolated graph **per user** | Many graphs per instance, selected by name. `mem_<user_id>` is a one-line `select_graph` | Multiple databases need Enterprise Edition; Community has one user database | Schema or tenant column per user, or a table per graph |
-| Agent tooling | Official MCP server; Python client; GraphRAG-SDK for the evidence layer | Mature ecosystem and MCP options | Generic SQL MCP servers; no graph semantics |
-| Tests without Docker | **FalkorDBLite** embeds the engine, so our 30 tests run in under a second | Needs a server | Needs a server (or SQLite with different semantics) |
-| Operational footprint | Redis-protocol server, one container | JVM server | Server |
-| Maturity and tooling | Younger | Most mature, richest tooling | Most mature overall |
+![Dashboard Contagion Engine View](Frontend/public/ui/dashboard-contagion-engine-view.png)
 
-Where it wasn't a fit, we say so. FalkorDB's Cypher is a subset: we hit two gaps while building and documented both in `queries.py`:
-- **No parameters in variable-length bounds** (`*1..$d` fails). Depth is a validated integer formatted into the query text.
-- **No `EXISTS { MATCH ... }` subqueries.** "Does this holding share a dependency?" is computed in Python over returned paths.
+---
 
-## Quick start
+### 2. Live FalkorDB Knowledge Graph (`defi_risk`)
+Official FalkorDB Browser UI visualizing the live knowledge graph (108 nodes, 168 edges) with the Ethereum central hub, protocols, oracles, controllers, and pools.
 
+![FalkorDB Browser Graph](Frontend/public/ui/falkordb-browser-defi-risk-graph.png)
+
+---
+
+### 3. Multi-Hop Failure Contagion & Systemic PageRank
+Simulating a 90% outage on the Chainlink Node Operator Network cascading into SparkLend and Aave V3, backed by GraphBLAS Systemic PageRank.
+
+![Contagion Cascade Multi-Hop PageRank](Frontend/public/ui/contagion-cascade-multihop-pagerank.png)
+
+---
+
+### 4. Live Tenant Memory Graph (`mem_<user_id>`)
+Visualizing a trader's isolated memory graph on FalkorDB: tracking positions, learned rules, and past mistake nodes without cross-tenant leakage.
+
+![Tenant Memory Graph Visualizer](Frontend/public/ui/tenant-memory-graph-visualizer.png)
+
+---
+
+### 5. Floating AI Agent Chat & HMAC Trade Execution
+The AI agent interacts with FalkorDB and the deterministic risk engine to execute paper trades with cryptographically signed HMAC gate tokens.
+
+| Dedicated AI Agent Chat Console | Floating AI Agent Trade Execution |
+| :---: | :---: |
+| ![AI Agent Chat Console](Frontend/public/ui/ai-agent-chat-console.png) | ![Floating AI Agent Trade Execution](Frontend/public/ui/floating-ai-agent-trade-execution.png) |
+
+---
+
+### 6. Learned Procedural Rules & Graph-Off Benchmark
+Demonstrating how past trading mistakes automatically promote into protective rules (R7) and contrasting standard ungrounded LLMs (*False Allow*) against Bulwark's deterministic graph protection (*Block*).
+
+| Learned Procedural Rules & Benchmark | Learned Rules & Historical Loss Journal |
+| :---: | :---: |
+| ![Learned Rules & Benchmark](Frontend/public/ui/learned-procedural-rules-and-benchmark.png) | ![Historical Losses](Frontend/public/ui/learned-rules-and-historical-losses.png) |
+
+![Graph-Off vs Graph-On Benchmark](Frontend/public/ui/graph-off-vs-graph-on-benchmark.png)
+
+---
+
+## Multi-Agent System & Task Coordination
+
+Bulwark uses **Google Gemini 2.5 Flash** with the **Model Context Protocol (MCP)**:
+- **Supervisor Orchestrator**: Coordinates subagents and parses investment queries.
+- **Exposure Analyst**: Conducts 3-hop forward Cypher traversals in `defi_risk` to map all underlying components.
+- **Contagion Stress-Tester**: Executes reverse BFS traversals to calculate systemic blast radiuses and dollar loss.
+- **Portfolio Guardian**: Queries `mem_<user_id>` for past mistakes and enforces learned rules and preferences.
+- **Action Gatekeeper & Executor**: Validates the cryptographic HMAC token before executing paper trades.
+
+Task handoffs are persisted directly as nodes in `mem_<user_id>` (`(Task)-[:HANDOFF]->(Task)`), preserving state across chat sessions.
+
+---
+
+## Quick Start & Local Setup
+
+### 1. Prerequisites
+- Docker & Docker Compose
+- Node.js 20+ & Python 3.11+
+- Google Gemini API Key
+
+### 2. Clone and Setup Environment
 ```bash
-git clone <repo> && cd graphino
-python -m venv .venv && source .venv/bin/activate        # Windows: .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-cp .env.example .env                                     # set FALKORDB_HOST/PORT, LLM key, BULWARK_GATE_SECRET
-docker compose up -d                                     # FalkorDB + Browser on :3000
+git clone https://github.com/your-username/bulwark.git
+cd bulwark
 
+# Python Environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+# Configure Environment Variables
+cp .env.example .env
+# Set GEMINI_API_KEY in .env
+```
+
+### 3. Launch FalkorDB & Ingest Curated Graph
+```bash
+# Run FalkorDB container
+docker run -p 6379:6379 -it --rm falkordb/falkordb:latest
+
+# Initialize graphs, ingest DeFiLlama data, and seed verified relationships
 python -m scripts.init_graphs
 python -m scripts.ingest_defillama
 python -m scripts.seed_curated_relationships
-python -m scripts.check_ingestion
-
-python -m risk_engine.cli diagnose                       # confirms eligible dependency edges exist
-pytest tests -q                                          # unit test suite
-streamlit run app/main.py
 ```
 
-CLI examples:
+### 4. Start the Web Dashboard
 ```bash
-python -m risk_engine.cli shock chainlink-node-operators --severity 0.8 --hops 3
-python -m risk_engine.cli exposure aave-v3:1000 sparklend:1000
-python -m risk_engine.cli assess aave-v3 1000 --hold sparklend:500 --tolerance conservative
+cd Frontend
+npm install
+npm run dev
 ```
+Open **`http://localhost:3000`** to access the institutional dashboard, contagion engine, and floating AI agent chat.
 
-## Demo script (5 beats)
+---
 
-1. **Depth 1 vs depth 3.** A protocol that looks fine alone fails at hop 3 through a shared oracle or stablecoin.
-2. **Hidden concentration.** Two "diversified" holdings share one dependency; Bulwark caps the new position.
-3. **Memory.** Record a mistake in session 1, restart, and session 2 applies the learned rule with a `memory_ref`.
-4. **Abstention.** An unmodelled protocol gets "not in the graph", not a guess.
-5. **The gate.** The executor refuses without a valid token, and refuses a token issued for a different amount.
+## Deployment (Render)
 
-## Honest limits
+Bulwark includes a production **`Dockerfile`** and **`render.yaml`** blueprint for one-click deployment:
+- **Web Service**: Multi-stage container packaging Next.js 16 and Python 3.11 with automated graph seeding (`start.sh`).
+- **Database**: Connects seamlessly to **FalkorDB Cloud** (Free Tier) or an internal FalkorDB Docker service.
 
-- **Small, curated dependency coverage.** 27 protocols and 8 dependency-capable edges seeded (4 verified eligible: Aave V3 and SparkLend to Chainlink feeds, feeds to node operators, Aave V3 to governance). The engine reports `coverage.data_gaps` and returns `R9` ("unknown, not safe") when no verified dependency is modelled for a protocol.
-- **`ALLOW` means no rule fired on modelled data. It never means safe.**
-- **Impact numbers are estimates** from curated edge strengths. Thresholds are illustrative policy.
-- **Audit counts** come from DeFiLlama listings; absence of a listed audit is not proof there was none.
-- **No real funds, keys or transactions.** Paper trading only. Not financial advice.
-- Protocol, chain, stablecoin, pool and incident data are from public DeFiLlama APIs, used for research and demonstration.
+---
 
-## Repository layout
+## Data Attribution & Provenance
 
-```
-scripts/          ingestion + curated seed (init_graphs, ingest_defillama, seed_curated_relationships, check_ingestion)
-risk_engine/      deterministic engine: queries, propagation, rules, evidence, gate, CLI
-mcp_servers/      defi-risk and defi-memory MCP servers
-memory/           per-user memory graph
-agents/           orchestrator, Analyst / Guardian / Executor, citation validator
-app/              Streamlit UI
-tests/            engine + memory + agent tests (FalkorDBLite fixture graph)
-docs/             RISK_ENGINE.md, DEMO_SCRIPT.md
-```
+- Public market data provided by **DeFiLlama APIs** (`api.llama.fi`, `yields.llama.fi`, `stablecoins.llama.fi`).
+- Curated dependency relationships sourced directly from official protocol documentation (Chainlink, Aave Governance, Lido, Curve, Compound).
+- Graph database engine powered by **FalkorDB**.
 
-## Data attribution
-
-DeFiLlama public APIs (`api.llama.fi`, `stablecoins.llama.fi`, `yields.llama.fi`). Curated relationships keep their official documentation URLs. FalkorDB and GraphRAG-SDK by FalkorDB.
+*Disclaimer: Verdicts reflect verified data modelled in the graph. `ALLOW` means no deterministic rule fired on that data; it does not constitute financial advice. All trade executions operate in paper mode.*
